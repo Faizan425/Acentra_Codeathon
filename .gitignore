@@ -24,3 +24,6 @@ localstack_data/
 uvicorn.*.log
 .DS_Store
 Thumbs.db
+__pycache__/
+.pytest_cache/
+*.py[cod]
