@@ -167,6 +167,3 @@ class FraudNotificationService:
             return True, "ok"
         except Exception as exc:
             return False, f"unavailable: {exc.__class__.__name__}"
-
-            return None
-        return self._topic_arn
