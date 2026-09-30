@@ -93,13 +93,29 @@ alert_error TEXT, created_at). One-to-one Transaction<->FraudFlag.
 
 ## LocalStack (no AWS account needed)
 
-localstack:3.8 (SNS) on :4566; init hook + backend startup both ensure topic
-`fraud-alerts` (idempotent create_topic). All env-configurable:
-AWS_ENDPOINT_URL, SNS_TOPIC_NAME, NOTIFICATIONS_ENABLED, dummy test/test creds.
-HIGH verdict publishes {transaction_id, account_id, amount, risk_score,
-risk_level, triggered_rules, reasons, timestamp} with short timeouts; never
-raises; outcome stored as alert_published/alert_error. Check:
-aws --endpoint-url=http://localhost:4566 sns list-topics.
+localstack:3.8 (SNS+SQS) on :4566; init hook
+`localstack/init/01-create-sns-topic.sh` creates topic `fraud-alerts`,
+queue `fraud-alerts-queue` (env `SQS_QUEUE_NAME`), and the SNS->SQS
+subscription with RawMessageDelivery, so every HIGH alert payload is
+readable. Backend startup also ensures the topic via idempotent
+create_topic. All env-configurable: AWS_ENDPOINT_URL, SNS_TOPIC_NAME,
+SQS_QUEUE_NAME, NOTIFICATIONS_ENABLED, dummy test/test creds. HIGH
+verdict publishes {transaction_id, account_id, amount, risk_score,
+risk_level, triggered_rules, reasons, timestamp} with short timeouts;
+never raises; outcome stored as alert_published/alert_error. View
+payloads (queue URL from `awslocal sqs list-queues`):
+
+```bash
+docker exec fraud-localstack awslocal sns list-topics
+docker exec fraud-localstack awslocal sqs list-queues
+docker exec fraud-localstack awslocal sns list-subscriptions-by-topic \
+  --topic-arn arn:aws:sns:us-east-1:000000000000:fraud-alerts
+docker exec fraud-localstack awslocal sqs receive-message \
+  --queue-url http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/fraud-alerts-queue \
+  --max-number-of-messages 10
+# or from the host (needs AWS CLI + AWS_ENDPOINT_URL=http://localhost:4566):
+aws --endpoint-url=http://localhost:4566 sns list-topics
+```
 
 ## Docker
 
