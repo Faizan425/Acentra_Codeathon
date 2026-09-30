@@ -1,0 +1,99 @@
+# Fraud Rule Engine - local demo stack.
+#
+#   postgres   : persisted transactions + fraud flags
+#   localstack : emulated AWS SNS for high-risk alerts (no real AWS account)
+#   backend    : FastAPI rule engine + REST API
+#   frontend   : React reviewer console (Vite dev server)
+#
+# Copy .env.example to .env to override any of the values below.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: fraud-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fraud_db}
+      POSTGRES_USER: ${POSTGRES_USER:-fraud_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud_pass123}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fraud_user} -d ${POSTGRES_DB:-fraud_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: fraud-localstack
+    environment:
+      - SERVICES=sns
+      - DEBUG=${LOCALSTACK_DEBUG:-0}
+      - PERSISTENCE=0
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - SNS_TOPIC_NAME=${SNS_TOPIC_NAME:-fraud-alerts}
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./localstack/init:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: fraud-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-fraud_user}:${POSTGRES_PASSWORD:-fraud_pass123}@postgres:5432/${POSTGRES_DB:-fraud_db}
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      SNS_TOPIC_NAME: ${SNS_TOPIC_NAME:-fraud-alerts}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
+      VELOCITY_MAX_TRANSACTIONS: ${VELOCITY_MAX_TRANSACTIONS:-5}
+      VELOCITY_WINDOW_MINUTES: ${VELOCITY_WINDOW_MINUTES:-10}
+      AMOUNT_MULTIPLIER: ${AMOUNT_MULTIPLIER:-10}
+      MAX_TRAVEL_SPEED_KMH: ${MAX_TRAVEL_SPEED_KMH:-1000}
+      HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-60}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: fraud-frontend
+    environment:
+      # Browser-side URL of the backend (the browser runs on the host machine).
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  localstack_data:
+
